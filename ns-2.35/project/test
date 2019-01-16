@@ -1,0 +1,21 @@
+echo "Deleting the old log files ..."
+rm *.log
+rm *.txt
+rm out.*
+echo "Done"
+
+echo "start testing, please wait ..."
+ns lte.tcl > out.txt 
+echo "Done"
+
+echo "The testing results(throughput, delay, jitter) are:"
+echo "---------------------------------------------------"
+echo ""
+awk -f throughput.awk out.tr
+echo ""
+awk -f delay.awk out.tr
+echo ""
+awk -f jitter.awk out.tr
+
+echo ""
+echo "check the out.txt out.tr out.nam for detailed information."

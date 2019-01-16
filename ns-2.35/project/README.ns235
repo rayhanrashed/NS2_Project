@@ -1,0 +1,14 @@
+This is a copy the original "ns-2.33/project/ directory"
+
+New files in 'ns-2.35/project/' are ...
+A copy of ns-2.35/common/packet.h
+lte-ns235.patch  
+README_ns-2.35
+
+New patched files in ns-2.35/project/ ... 
+Copies of the LTE patched files, ns-2.35/queue/{ queue.h, red.h }
+
+---------------
+
+
+21` April 2014 , knudfl.

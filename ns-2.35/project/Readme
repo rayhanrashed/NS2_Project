@@ -1,0 +1,70 @@
+Record the design idea & simulation skill
+
+2009, Jul. 3, Friday, Qiu Qinlong:
+1) debug segmentation fault
+   - with the simplest code compare the original working SW
+   - e.g. LTEQueue --> DropTail
+2) be carful with point, especially with point=NULL
+3) testing script is very helpful
+
+2009, May 10, Sunday, Qiu Qinlong:
+backup location: qiuqinlong@163.com/neteasynetdisk/mydocument/project/2009_5_10_ver_1_0
+
+simulation:
+ - 60 seconds
+ - 10 subscribers
+ - 5 classes' traffic
+ - classification and scheduling
+
+working SW: 
+ - project/lte.tcl
+ - project/ltequeue.cc
+ - project/ltequeue.h
+ - queue/drop-tail.h
+ - queue/red.h
+ - tcl/webcache/http-agent.tcl
+ - tcl/webcache/http-cache.tcl
+ - tcl/webcache/http-server.tcl
+ - tcl/rtp/session-rtp.tcl
+
+next step:
+ - configure 5 classes' Queue parameters, such as limit_
+ - cofigure application parameters
+ - do the statistics
+ - comparing test
+ - write paper
+
+other useful files:
+ - tcl/lib/ns-default.tcl
+ - project/*.cc, *.h, test
+
+2009 May 11, Qiu Qinlong
+
+The following comand sometimes can solve very difficult problem, such as memory corrupted!
+	- make clean;
+	- make;
+
+Class A {
+public: virtual void print(){};
+friend class B;
+protected: int a;
+};// The ";" is a must, otherwise, there will be very strange compile error.
+
+Class B {
+A *a=new A;
+a->a; //class B can use class A's protected member due to B is A's friend class.
+};
+
+Class C: public A {
+public : virtual void print(){};
+};
+
+A *p, *q;
+p = new A;
+q = new C;
+p->print();//class A's print
+q->print();//class B's print
+//if without virtual, q->print will be A's print.
+
+When using REDQueue, Queue/RED set q_weight_ 0.002 to avoid floating error!
+

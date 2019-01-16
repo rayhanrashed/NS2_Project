@@ -1,0 +1,569 @@
+--- drop-tail.cc	2008-04-01 04:00:08.000000000 +0200
++++ queue/drop-tail.cc	2014-02-12 20:56:34.000000000 +0100
+@@ -47,6 +47,16 @@
+ 	}
+ } class_drop_tail;
+ 
++Packet* DropTail::find(int i) 
++{
++	return q_->lookup(i);
++}
++
++void DropTail::remove(Packet *p)
++{
++	q_->remove(p);
++}
++
+ void DropTail::reset()
+ {
+ 	Queue::reset();
+@@ -84,6 +94,14 @@
+  */
+ void DropTail::enque(Packet* p)
+ {
++	hdr_ip *iph=HDR_IP(p);
++	
++	if(iph->flowid()!=0 && iph->flowid()!=1 && iph->flowid()!=2 && iph->flowid()!=3) 
++	{
++		printf("Invalide class id in DropTail::enque, Packet's class id is %d\n", iph->flowid());
++		exit(0);
++	}
++
+ 	if (summarystats) {
+                 Queue::updateStats(qib_?q_->byteLength():q_->length());
+ 	}
+--- drop-tail.h	2008-04-01 04:00:08.000000000 +0200
++++ queue/drop-tail.h	2014-02-12 20:56:34.000000000 +0100
+@@ -58,6 +58,13 @@
+ 	~DropTail() {
+ 		delete q_;
+ 	}
++	void enqueue(Packet* p){enque(p);}
++	Packet* dequeue() {return deque();}
++	int length(){return q_->length();} 
++	int meanPacketSize(){return mean_pktsize_;}
++	void setqlim(int i) {qlim_=i;}
++	Packet* find(int i);
++	void remove(Packet* p);
+   protected:
+ 	void reset();
+ 	int command(int argc, const char*const* argv); 
+--- http-agent.tcl	2008-04-01 04:00:11.000000000 +0200
++++ tcl/webcache/http-agent.tcl	2014-02-12 20:56:34.000000000 +0100
+@@ -181,6 +181,10 @@
+ 	lappend slist_ $server
+ 	set tcp [new Agent/TCP/$TRANSPORT_]
+ 	$tcp set fid_ [$self getfid]
++
++	# Qiu Qinlong: simulate interactive traffic, so class_=2
++	$tcp set class_ 2
++
+ 	$ns_ attach-agent $node_ $tcp
+ 
+ 	set ret [$server alloc-connection $self $fid_]
+--- http-cache.tcl	2008-04-01 04:00:11.000000000 +0200
++++ tcl/webcache/http-cache.tcl	2014-02-12 20:56:34.000000000 +0100
+@@ -154,6 +154,10 @@
+ 	lappend clist_ $client
+ 	set snk [new Agent/TCP/$TRANSPORT_]
+ 	$snk set fid_ $fid
++
++	# Qiu Qinlong: simulate interactive traffic, so class_=2
++	$snk set class_ 2
++
+ 	$ns_ attach-agent $node_ $snk
+ 	$snk listen
+ 	set wrapper [new Application/TcpApp $snk]
+--- http-server.tcl	2008-04-01 04:00:11.000000000 +0200
++++ tcl/webcache/http-server.tcl	2014-02-12 20:56:34.000000000 +0100
+@@ -213,6 +213,10 @@
+ 	lappend clist_ $client
+ 	set snk [new Agent/TCP/$TRANSPORT_]
+ 	$snk set fid_ $fid
++
++	# Qiu Qinlong: simulate interactive traffic, so class_=2
++	$snk set class_ 2
++
+ 	$ns_ attach-agent $node_ $snk
+ 	$snk listen
+ 	set wrapper [new Application/TcpApp $snk]
+--- Makefile.in-orig	2014-04-21 02:06:45.897808498 +0200
++++ Makefile.in	2014-04-21 01:28:47.000000000 +0200
+@@ -333,6 +333,12 @@
+ 	wpan/p802_15_4sscs.o wpan/p802_15_4timer.o \
+ 	wpan/p802_15_4trace.o wpan/p802_15_4transac.o \
+ 	apps/pbc.o \
++	project/ltequeue.o \
++	project/ulairqueue.o \
++	project/dlairqueue.o \
++	project/uls1queue.o \
++	project/dls1queue.o \
++	project/dlqueue.o \
+ 	@V_STLOBJ@
+ 
+ 
+--- ns-default.tcl	2008-04-01 04:00:23.000000000 +0200
++++ tcl/lib/ns-default.tcl	2014-02-12 20:56:34.000000000 +0100
+@@ -99,10 +99,17 @@
+ # change DropTail to RED for RED on individual queues
+ FQLink set queueManagement_ DropTail
+ 
++
++# Qiu Qinlong: start of configure DropTail
++# DropTail is used in aGW -> server
+ Queue/DropTail set drop_front_ false
+ Queue/DropTail set summarystats_ false
+ Queue/DropTail set queue_in_bytes_ false
+-Queue/DropTail set mean_pktsize_ 500
++Queue/DropTail set mean_pktsize_ 512
++#buffer size is not important due to the high bandwidth aGW -> server
++Queue/DropTail set limit_ 5000
++# Qiu Qinlong: end of configure DropTail
++
+ 
+ Queue/DropTail/PriQueue set Prefer_Routing_Protocols    1
+ 
+@@ -134,7 +141,7 @@
+ Queue/RED set mean_pktsize_ 500
+ Queue/RED set idle_pktsize_ 100
+ # Queue/RED set q_weight_ 0.002
+-Queue/RED set q_weight_ -1
++Queue/RED set q_weight_ 0.002
+ # Queue/RED/q_weight_ was changed on 12/29/01, for automatic configuration.
+ Queue/RED set wait_ true
+ Queue/RED set linterm_ 10
+@@ -169,6 +176,233 @@
+ Queue/RED set cautious_ 0
+ Queue/RED set feng_adaptive_ 0
+ 
++
++# Qiu Qinlong: start of configure Queue/LTEQueue
++Queue/LTEQueue set drop_front_ 0
++Queue/LTEQueue set summarystats_ 0
++Queue/LTEQueue set queue_in_bytes_ 0
++Queue/LTEQueue set mean_pktsize_ 512
++Queue/LTEQueue set debug_ false 
++Queue/LTEQueue set qos_ false 
++Queue/LTEQueue set flow_control_ false 
++Queue/LTEQueue set HVQ_UE false
++Queue/LTEQueue set HVQ_cell false
++Queue/LTEQueue set HVQ_eNB false
++Queue/LTEQueue set snode_ -1
++Queue/LTEQueue set dnode_ -1
++# end of configure Queue/LTEQueue
++
++
++# Qiu Qinlong: start of configure ULAirQueue
++# ULAirQueue is used in UE -> eNB
++Queue/LTEQueue/ULAirQueue set mean_pktsize_ 512
++Queue/LTEQueue/ULAirQueue set limit_ 10
++Queue/LTEQueue/ULAirQueue set bytes_ true ;		# default changed on 10/11/2004.
++Queue/LTEQueue/ULAirQueue set queue_in_bytes_ true ;	# default changed on 10/11/2004.
++Queue/LTEQueue/ULAirQueue set thresh_ 5
++Queue/LTEQueue/ULAirQueue set maxthresh_ 10
++Queue/LTEQueue/ULAirQueue set thresh_queue_ [Queue/LTEQueue/ULAirQueue set limit_]
++Queue/LTEQueue/ULAirQueue set maxthresh_queue_ [Queue/LTEQueue/ULAirQueue set limit_]
++Queue/LTEQueue/ULAirQueue set idle_pktsize_ 100
++Queue/LTEQueue/ULAirQueue set q_weight_ 0.002
++Queue/LTEQueue/ULAirQueue set wait_ true
++Queue/LTEQueue/ULAirQueue set linterm_ 10
++Queue/LTEQueue/ULAirQueue set mark_p_ 0.1
++Queue/LTEQueue/ULAirQueue set use_mark_p_ true
++Queue/LTEQueue/ULAirQueue set setbit_ false
++Queue/LTEQueue/ULAirQueue set gentle_ true
++Queue/LTEQueue/ULAirQueue set drop_tail_ true
++Queue/LTEQueue/ULAirQueue set drop_front_ false
++Queue/LTEQueue/ULAirQueue set drop_rand_ false
++Queue/LTEQueue/ULAirQueue set doubleq_ false
++Queue/LTEQueue/ULAirQueue set ns1_compat_ false
++Queue/LTEQueue/ULAirQueue set dqthresh_ 50
++Queue/LTEQueue/ULAirQueue set ave_ 0.0
++Queue/LTEQueue/ULAirQueue set prob1_ 0.0
++Queue/LTEQueue/ULAirQueue set curq_ 0
++Queue/LTEQueue/ULAirQueue set cur_max_p_ 0
++Queue/LTEQueue/ULAirQueue set summarystats_ false
++### Adaptive RED.
++Queue/LTEQueue/ULAirQueue set alpha_ 0.01
++Queue/LTEQueue/ULAirQueue set beta_ 0.9 
++Queue/LTEQueue/ULAirQueue set adaptive_ 0
++Queue/LTEQueue/ULAirQueue set interval_ 0.5
++Queue/LTEQueue/ULAirQueue set targetdelay_ 0.005
++Queue/LTEQueue/ULAirQueue set top_ 0.5
++Queue/LTEQueue/ULAirQueue set bottom_ 0
++Queue/LTEQueue/ULAirQueue set cautious_ 0
++Queue/LTEQueue/ULAirQueue set feng_adaptive_ 0
++# Qiu Qinlong: end of configure ULAirQueue
++
++
++# Qiu Qinlong: start of configure DLAirQueue
++# ULAirQueue is used in eNB -> UE
++Queue/LTEQueue/DLAirQueue set mean_pktsize_ 512
++Queue/LTEQueue/DLAirQueue set limit_ 10
++Queue/LTEQueue/DLAirQueue set bytes_ true ;		# default changed on 10/11/2004.
++Queue/LTEQueue/DLAirQueue set queue_in_bytes_ true ;	# default changed on 10/11/2004.
++Queue/LTEQueue/DLAirQueue set thresh_ 5
++Queue/LTEQueue/DLAirQueue set maxthresh_ 10
++Queue/LTEQueue/DLAirQueue set thresh_queue_ [Queue/LTEQueue/DLAirQueue set limit_]
++Queue/LTEQueue/DLAirQueue set maxthresh_queue_ [Queue/LTEQueue/DLAirQueue set limit_]
++Queue/LTEQueue/DLAirQueue set idle_pktsize_ 100
++Queue/LTEQueue/DLAirQueue set q_weight_ 0.002
++Queue/LTEQueue/DLAirQueue set wait_ true
++Queue/LTEQueue/DLAirQueue set linterm_ 10
++Queue/LTEQueue/DLAirQueue set mark_p_ 0.1
++Queue/LTEQueue/DLAirQueue set use_mark_p_ true
++Queue/LTEQueue/DLAirQueue set setbit_ false
++Queue/LTEQueue/DLAirQueue set gentle_ true
++Queue/LTEQueue/DLAirQueue set drop_tail_ true
++Queue/LTEQueue/DLAirQueue set drop_front_ false
++Queue/LTEQueue/DLAirQueue set drop_rand_ false
++Queue/LTEQueue/DLAirQueue set doubleq_ false
++Queue/LTEQueue/DLAirQueue set ns1_compat_ false
++Queue/LTEQueue/DLAirQueue set dqthresh_ 50
++Queue/LTEQueue/DLAirQueue set ave_ 0.0
++Queue/LTEQueue/DLAirQueue set prob1_ 0.0
++Queue/LTEQueue/DLAirQueue set curq_ 0
++Queue/LTEQueue/DLAirQueue set cur_max_p_ 0
++Queue/LTEQueue/DLAirQueue set summarystats_ false
++### Adaptive RED.
++Queue/LTEQueue/DLAirQueue set alpha_ 0.01
++Queue/LTEQueue/DLAirQueue set beta_ 0.9 
++Queue/LTEQueue/DLAirQueue set adaptive_ 0
++Queue/LTEQueue/DLAirQueue set interval_ 0.5
++Queue/LTEQueue/DLAirQueue set targetdelay_ 0.005
++Queue/LTEQueue/DLAirQueue set top_ 0.5
++Queue/LTEQueue/DLAirQueue set bottom_ 0
++Queue/LTEQueue/DLAirQueue set cautious_ 0
++Queue/LTEQueue/DLAirQueue set feng_adaptive_ 0
++# Qiu Qinlong: end of configure DLAirQueue
++
++
++# Qiu Qinlong: start of configure ULS1Queue
++# ULS1Queue is used in eNB -> aGW
++Queue/LTEQueue/ULS1Queue set mean_pktsize_ 512
++Queue/LTEQueue/ULS1Queue set limit_ 5000
++Queue/LTEQueue/ULS1Queue set bytes_ true ;		# default changed on 10/11/2004.
++Queue/LTEQueue/ULS1Queue set queue_in_bytes_ true ;	# default changed on 10/11/2004.
++Queue/LTEQueue/ULS1Queue set thresh_ 500
++Queue/LTEQueue/ULS1Queue set maxthresh_ 0
++Queue/LTEQueue/ULS1Queue set thresh_queue_ [Queue/LTEQueue/ULS1Queue set limit_]
++Queue/LTEQueue/ULS1Queue set maxthresh_queue_ [Queue/LTEQueue/ULS1Queue set limit_]
++Queue/LTEQueue/ULS1Queue set idle_pktsize_ 100
++Queue/LTEQueue/ULS1Queue set q_weight_ 0.002
++Queue/LTEQueue/ULS1Queue set wait_ true
++Queue/LTEQueue/ULS1Queue set linterm_ 10
++Queue/LTEQueue/ULS1Queue set mark_p_ 0.1
++Queue/LTEQueue/ULS1Queue set use_mark_p_ true
++Queue/LTEQueue/ULS1Queue set setbit_ false
++Queue/LTEQueue/ULS1Queue set gentle_ true
++Queue/LTEQueue/ULS1Queue set drop_tail_ true
++Queue/LTEQueue/ULS1Queue set drop_front_ false
++Queue/LTEQueue/ULS1Queue set drop_rand_ false
++Queue/LTEQueue/ULS1Queue set doubleq_ false
++Queue/LTEQueue/ULS1Queue set ns1_compat_ false
++Queue/LTEQueue/ULS1Queue set dqthresh_ 50
++Queue/LTEQueue/ULS1Queue set ave_ 0.0
++Queue/LTEQueue/ULS1Queue set prob1_ 0.0
++Queue/LTEQueue/ULS1Queue set curq_ 0
++Queue/LTEQueue/ULS1Queue set cur_max_p_ 0
++Queue/LTEQueue/ULS1Queue set summarystats_ false
++### Adaptive RED.
++Queue/LTEQueue/ULS1Queue set alpha_ 0.01
++Queue/LTEQueue/ULS1Queue set beta_ 0.9 
++Queue/LTEQueue/ULS1Queue set adaptive_ 0
++Queue/LTEQueue/ULS1Queue set interval_ 0.5
++Queue/LTEQueue/ULS1Queue set targetdelay_ 0.005
++Queue/LTEQueue/ULS1Queue set top_ 0.5
++Queue/LTEQueue/ULS1Queue set bottom_ 0
++Queue/LTEQueue/ULS1Queue set cautious_ 0
++Queue/LTEQueue/ULS1Queue set feng_adaptive_ 0
++#Qiu Qinlong: end of configure ULS1Queue
++
++
++# Qiu Qinlong: start of configure LTEQueue/DLS1Queue
++# ULAirQueue is used in aGW -> eNB
++Queue/LTEQueue/DLS1Queue set mean_pktsize_ 512
++Queue/LTEQueue/DLS1Queue set limit_ 5000
++Queue/LTEQueue/DLS1Queue set bytes_ true ;		# default changed on 10/11/2004.
++Queue/LTEQueue/DLS1Queue set queue_in_bytes_ true ;	# default changed on 10/11/2004.
++Queue/LTEQueue/DLS1Queue set thresh_ 50
++Queue/LTEQueue/DLS1Queue set maxthresh_ 100
++Queue/LTEQueue/DLS1Queue set thresh_queue_ [Queue/LTEQueue/DLS1Queue set limit_]
++Queue/LTEQueue/DLS1Queue set maxthresh_queue_ [Queue/LTEQueue/DLS1Queue set limit_]
++Queue/LTEQueue/DLS1Queue set idle_pktsize_ 100
++Queue/LTEQueue/DLS1Queue set q_weight_ 0.002
++Queue/LTEQueue/DLS1Queue set wait_ true
++Queue/LTEQueue/DLS1Queue set linterm_ 10
++Queue/LTEQueue/DLS1Queue set mark_p_ 0.1
++Queue/LTEQueue/DLS1Queue set use_mark_p_ true
++Queue/LTEQueue/DLS1Queue set setbit_ false
++Queue/LTEQueue/DLS1Queue set gentle_ true
++Queue/LTEQueue/DLS1Queue set drop_tail_ true
++Queue/LTEQueue/DLS1Queue set drop_front_ false
++Queue/LTEQueue/DLS1Queue set drop_rand_ false
++Queue/LTEQueue/DLS1Queue set doubleq_ false
++Queue/LTEQueue/DLS1Queue set ns1_compat_ false
++Queue/LTEQueue/DLS1Queue set dqthresh_ 50
++Queue/LTEQueue/DLS1Queue set ave_ 0.0
++Queue/LTEQueue/DLS1Queue set prob1_ 0.0
++Queue/LTEQueue/DLS1Queue set curq_ 0
++Queue/LTEQueue/DLS1Queue set cur_max_p_ 0
++Queue/LTEQueue/DLS1Queue set summarystats_ false
++### Adaptive RED.
++Queue/LTEQueue/DLS1Queue set alpha_ 0.01
++Queue/LTEQueue/DLS1Queue set beta_ 0.9 
++Queue/LTEQueue/DLS1Queue set adaptive_ 0
++Queue/LTEQueue/DLS1Queue set interval_ 0.5
++Queue/LTEQueue/DLS1Queue set targetdelay_ 0.005
++Queue/LTEQueue/DLS1Queue set top_ 0.5
++Queue/LTEQueue/DLS1Queue set bottom_ 0
++Queue/LTEQueue/DLS1Queue set cautious_ 0
++Queue/LTEQueue/DLS1Queue set feng_adaptive_ 0
++#Qiu Qinlong: end of configure LTEQueue/DLS1Queue
++
++
++# Qiu Qinlong: start of configure LTEQueue/DLQueue
++# DLQueue is used in server -> aGW
++Queue/LTEQueue/DLQueue set mean_pktsize_ 512
++Queue/LTEQueue/DLQueue set limit_ 5000
++Queue/LTEQueue/DLQueue set bytes_ true ;		# default changed on 10/11/2004.
++Queue/LTEQueue/DLQueue set queue_in_bytes_ true ;	# default changed on 10/11/2004.
++Queue/LTEQueue/DLQueue set thresh_ 500
++Queue/LTEQueue/DLQueue set maxthresh_ 1000
++Queue/LTEQueue/DLQueue set thresh_queue_ [Queue/LTEQueue/DLQueue set limit_]
++Queue/LTEQueue/DLQueue set maxthresh_queue_ [Queue/LTEQueue/DLQueue set limit_]
++Queue/LTEQueue/DLQueue set idle_pktsize_ 100
++Queue/LTEQueue/DLQueue set q_weight_ 0.002
++Queue/LTEQueue/DLQueue set wait_ true
++Queue/LTEQueue/DLQueue set linterm_ 10
++Queue/LTEQueue/DLQueue set mark_p_ 0.1
++Queue/LTEQueue/DLQueue set use_mark_p_ true
++Queue/LTEQueue/DLQueue set setbit_ false
++Queue/LTEQueue/DLQueue set gentle_ true
++Queue/LTEQueue/DLQueue set drop_tail_ true
++Queue/LTEQueue/DLQueue set drop_front_ false
++Queue/LTEQueue/DLQueue set drop_rand_ false
++Queue/LTEQueue/DLQueue set doubleq_ false
++Queue/LTEQueue/DLQueue set ns1_compat_ false
++Queue/LTEQueue/DLQueue set dqthresh_ 50
++Queue/LTEQueue/DLQueue set ave_ 0.0
++Queue/LTEQueue/DLQueue set prob1_ 0.0
++Queue/LTEQueue/DLQueue set curq_ 0
++Queue/LTEQueue/DLQueue set cur_max_p_ 0
++Queue/LTEQueue/DLQueue set summarystats_ false
++### Adaptive RED.
++Queue/LTEQueue/DLQueue set alpha_ 0.01
++Queue/LTEQueue/DLQueue set beta_ 0.9 
++Queue/LTEQueue/DLQueue set adaptive_ 0
++Queue/LTEQueue/DLQueue set interval_ 0.5
++Queue/LTEQueue/DLQueue set targetdelay_ 0.005
++Queue/LTEQueue/DLQueue set top_ 0.5
++Queue/LTEQueue/DLQueue set bottom_ 0
++Queue/LTEQueue/DLQueue set cautious_ 0
++Queue/LTEQueue/DLQueue set feng_adaptive_ 0
++#Qiu Qinlong: end of configure LTEQueue/DLQueue
++
++
+ Queue/RED/RIO set bytes_ false
+ Queue/RED/RIO set queue_in_bytes_ false
+ Queue/RED/RIO set thresh_ 5
+@@ -487,10 +721,13 @@
+ Application/Traffic/RealAudio set interpolation_ 0
+ Application/Traffic/RealAudio set maxEntry_ 32
+ 
+-Application/Traffic/CBR set rate_ 448Kb	;# corresponds to interval of 3.75ms
+-Application/Traffic/CBR set packetSize_ 210
+-Application/Traffic/CBR set random_ 0
+-Application/Traffic/CBR set maxpkts_ 268435456; # 0x10000000
++# Qiu Qinlong: start of configure CBR traffic
++# CBR traffic is usde to simulate the streaming traffic
++Application/Traffic/CBR set rate_ 128Kb	;# send rate during on time (bps) 
++Application/Traffic/CBR set packetSize_ 210 ;#rate=packetSize_*8/interval
++Application/Traffic/CBR set random_ 1; # random noise in the interval, and packet size
++Application/Traffic/CBR set maxpkts_ 268435456; # maximum packet number, almost no limitation
++# Qiu Qinlong: end of configure CBR traffic
+ 
+ Application/Telnet set interval_ 1.0
+ 
+@@ -602,6 +839,7 @@
+ Simulator set WirelessNewTrace_ 0
+ Simulator set propInstCreated_ 0
+ 
++ 
+ # Enable packet reference count
+ SessionSim set rc_ 0
+ 
+--- ns-lib.tcl	2008-04-01 04:00:23.000000000 +0200
++++ tcl/lib/ns-lib.tcl	2014-02-12 20:56:34.000000000 +0100
+@@ -1016,7 +1016,10 @@
+ 
+ 	if [info exists queueMap_($qtype)] {
+ 		set qtype $queueMap_($qtype)
++	} else {
+ 	}
++		
++
+ 	# construct the queue
+ 	set qtypeOrig $qtype
+ 	switch -exact $qtype {
+@@ -1039,6 +1042,11 @@
+ 			}
+ 		}
+ 	}
++
++	# Qiu Qinlong:set the source node and destination node for the created queue
++	$q set snode_ $sid 
++	$q set dnode_ $did 
++	
+ 	# Now create the link
+ 	switch -exact $qtypeOrig {
+ 		RTM {
+--- queue.h	2008-04-01 04:00:08.000000000 +0200
++++ queue/queue.h	2014-02-12 20:56:34.000000000 +0100
+@@ -79,6 +79,25 @@
+ 	virtual void remove(Packet*);
+ 	/* Remove a packet, located after a given packet. Either could be 0. */
+ 	void remove(Packet *, Packet *);
++
++	//Qiu Qinlong: deque a specific packet
++	Packet* sdeque(int i) {
++		Packet* p=lookup(i);
++		
++		if(NULL==p) return NULL;
++		
++		if(p==head_){
++			return deque();
++		}
++	
++		Packet* pp=lookup(i-1);
++		pp->next_ = p->next_;
++		--len_;
++		bytes_ -= hdr_cmn::access(p)->size();
++		if(p==tail_){tail_=pp;}
++		return p;
++	}
++
+         Packet* head() { return head_; }
+ 	Packet* tail() { return tail_; }
+ 	// MONARCH EXTNS
+--- red.cc	2008-04-01 04:00:08.000000000 +0200
++++ queue/red.cc	2014-02-12 20:56:34.000000000 +0100
+@@ -162,6 +162,58 @@
+ 	
+ }
+ 
++/* It seems there is some problem in the default value of the RED.
++   The default value is defined in ~ns/tcl/lib/ns-default.tcl.
++   Hard code the threshold values min and max here. 
++   i=0		UE
++   i=1		cell
++   i=2		eNB
++*/
++int REDQueue::flowControl(int i)
++{
++	switch(i) {
++		case 1: {
++			if(length() < 5)
++				return -1;//no flow control
++			double u=Random::uniform(0,1);
++			if(((double)length())/10.0 > u)
++			{
++				return 1;//flow control with probability u
++			}
++			else
++				return -1;//no flow control	
++			break;
++		}
++		case 2: {
++			if(length() < 5)
++				return -1;//no flow control
++			double u=Random::uniform(0,1);
++			if(((double)length())/10.0 > u)
++			{
++				return 1;//flow control with probability u
++			}
++			else
++				return -1;//no flow control	
++			break;
++		}
++		case 3: {
++			if(length() < 50)
++				return -1;//no flow control
++			double u=Random::uniform(0,1);
++			if(((double)length())/100.0 > u)
++			{
++				return 1;//flow control with probability u
++			}
++			else
++				return -1;//no flow control	
++			break;
++		}
++		default: {
++			printf("invalid flowcontrol parameters in REDQueue.\n");
++			exit(0);
++		}
++	}
++}
+ 
+ /*
+  * Note: if the link bandwidth changes in the course of the
+@@ -745,6 +797,7 @@
+ 		else {
+ 			reportDrop(pkt);
+ 			drop(pkt);
++			printf("one packet is dropped in RED\n");
+ 		}
+ 	} else {
+ 		/* forced drop, or not a drop: first enqueue pkt */
+@@ -757,6 +810,7 @@
+ 			q_->remove(pkt);
+ 			reportDrop(pkt);
+ 			drop(pkt);
++			printf("one packet is dropped in RED\n");
+ 			if (!ns1_compat_) {
+ 				// bug-fix from Philip Liu, <phill@ece.ubc.ca>
+ 				edv_.count = 0;
+--- red.h	2008-04-01 04:00:08.000000000 +0200
++++ queue/red.h	2014-02-12 20:56:34.000000000 +0100
+@@ -143,6 +143,14 @@
+  public:	
+ 	/*	REDQueue();*/
+ 	REDQueue(const char * = "Drop");
++	void enqueue(Packet* p) {enque(p);}
++	Packet* dequeue() {return deque();}
++	int length() { return q_->length();}
++	int meanPacketSize(){return edp_.mean_pktsize;}
++	void remove(Packet* p) {q_->remove(p);}
++	Packet* find(int i) {return q_->lookup(i);}
++	int flowControl(int i);
++	void setqlim(int i) {qlim_=i;}
+  protected:
+ 	void initParams();
+ 	int command(int argc, const char*const* argv);
+--- session-rtp.tcl	2008-04-01 04:00:23.000000000 +0200
++++ tcl/rtp/session-rtp.tcl	2014-02-12 20:56:34.000000000 +0100
+@@ -51,6 +51,10 @@
+ 	set cchan_ [new Agent/RTCP]
+ 	set dchan_ [new Agent/CBR/RTP]
+ 	$dchan_ set packetSize_ 512
++	
++	# Qiu Qinlong: simulate conversational traffic, so class_=0
++	$cchan_ set class_ 0
++	$dchan_ set class_ 0
+ 
+ 	$dchan_ session $self
+ 	$cchan_ session $self
+@@ -129,12 +133,12 @@
+ 
+ 	mvar node_ dchan_ cchan_ 
+ 
+-	$dchan_ set dst_ $g
++	$dchan_ set dst_addr_ $g
+ 	$node_ join-group $dchan_ $g
+ 
+ 	incr g
+ 
+-	$cchan_ set dst_ $g
++	$cchan_ set dst_addr_ $g
+ 	$node_ join-group $cchan_ $g
+ }
+ 
